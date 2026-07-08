@@ -1,0 +1,3 @@
+# Build-time dependencies (install with `pip install -r requirements-dev.txt`)
+# Run `python build.py` to create a standalone executable.
+PyInstaller>=6.0,<7
