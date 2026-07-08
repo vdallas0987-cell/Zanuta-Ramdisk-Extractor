@@ -20,7 +20,7 @@ import plistlib
 import subprocess
 import zipfile
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 try:
     from .models import (
@@ -51,24 +51,95 @@ _CHUNK_SIZE = 256 * 1024      # 256 KB streaming buffer
 
 
 # ---------------------------------------------------------------------------
-#  Scanning
+#  Scanning  (case-insensitive + ZIP validation)
 # ---------------------------------------------------------------------------
 
-def find_ipsw_files(directory: Path) -> List[Path]:
-    """Recursively discover every ``.ipsw`` under *directory*.
+def _is_zip_file(path: Path) -> bool:
+    """Confirma que o ficheiro começa com a assinatura ZIP (PK\x03\x04)."""
+    try:
+        with open(path, "rb") as f:
+            return f.read(4) == b"PK\x03\x04"
+    except OSError:
+        return False
+
+
+def find_ipsws(folder: str, recursive: bool = True) -> List[Path]:
+    """Discover valid ``.ipsw`` files under *folder*.
+
+    Procura de forma **case-insensitive** (aceita ``.IPSW``, ``.Ipsw``, etc.)
+    e valida que cada candidato é realmente um ficheiro ZIP.
 
     Raises
     ------
     NotADirectoryError
         If *directory* does not exist or is not a folder.
     """
-    directory = Path(directory).resolve(strict=False)
-    if not directory.is_dir():
-        raise NotADirectoryError(f"Directory not found: {directory}")
+    folder = Path(folder).resolve(strict=False)
+    if not folder.is_dir():
+        raise NotADirectoryError(f"Directory not found: {folder}")
 
-    files = sorted(directory.rglob("*.ipsw"))
-    logger.info("Found %d IPSW file(s) in %s", len(files), directory)
-    return files
+    pattern = "**/*" if recursive else "*"
+    candidates = [
+        p for p in folder.glob(pattern)
+        if p.is_file() and p.suffix.lower() == ".ipsw"
+    ]
+
+    valid: List[Path] = []
+    for p in candidates:
+        if _is_zip_file(p):
+            valid.append(p)
+        else:
+            logger.warning("Ignorado: %s — ficheiro .ipsw inválido (não é um ZIP válido)", p.name)
+
+    logger.info("Found %d valid IPSW file(s) in %s", len(valid), folder)
+    return sorted(valid)
+
+
+# Keep old name as an alias for backward compatibility
+find_ipsw_files = find_ipsws
+
+
+# ---------------------------------------------------------------------------
+#  BuildManifest parsing
+# ---------------------------------------------------------------------------
+
+def _get_device_info(plist: dict) -> Optional[Dict[str, str]]:
+    """Itera todas as *BuildIdentities* e devolve a primeira que contenha
+    ``ProductType`` e um ``RestoreRamDisk`` válido.
+
+    Returns
+    -------
+    dict or None
+        Dicionário com ``product_type``, ``version``, ``build``, ``ramdisk_path``
+        ou ``None`` se nenhuma identidade for válida.
+    """
+    for identity in plist.get("BuildIdentities", []):
+        info = identity.get("Info", {})
+        product_type = info.get("ProductType")
+        if not product_type:
+            continue
+
+        restore = identity.get("Manifest", {}).get("Restore", {})
+        # Tenta ambas as grafias possíveis do ramdisk de restauro
+        ramdisk_info = restore.get("RestoreRamDisk") or restore.get("Restore RamDisk")
+        if not ramdisk_info:
+            continue
+
+        ramdisk_path = (
+            ramdisk_info.get("Info", {}).get("Path")
+            or ramdisk_info.get("Info", {}).get("path")
+        )
+        if not ramdisk_path:
+            continue
+
+        return {
+            "product_type": product_type,
+            "version": plist.get("ProductVersion", "unknown"),
+            "build": plist.get("ProductBuildVersion", "unknown"),
+            "ramdisk_path": ramdisk_path,
+        }
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -146,29 +217,16 @@ def parse_ipsw(ipsw_path: Path) -> IPSWInfo:
         with zipfile.ZipFile(ipsw_path, "r") as zf:
             manifest = _extract_plist(zf)
 
-            identity = _get_nested(manifest, "BuildIdentities.0", {})
-            if not identity:
-                raise ValueError("BuildIdentities[0] missing from BuildManifest")
-
-            product_type = _get_nested(identity, "Info.ProductType")
-            if not product_type:
-                raise ValueError("ProductType not found in BuildIdentities[0].Info")
-
-            product_version = str(
-                manifest.get("ProductVersion", _get_nested(identity, "Info.ProductVersion", "unknown"))
-            )
-            product_build = str(
-                manifest.get("ProductBuildVersion", _get_nested(identity, "Info.ProductBuildVersion", "unknown"))
-            )
-
-            ramdisk_declared = _get_nested(
-                identity, "Manifest.Restore.RestoreRamDisk.Info.Path"
-            )
-            if not ramdisk_declared:
+            device_info = _get_device_info(manifest)
+            if device_info is None:
                 raise ValueError(
-                    "RestoreRamDisk path not found in BuildManifest"
+                    "Nenhuma BuildIdentity contém ProductType e RestoreRamDisk válidos"
                 )
 
+            product_type = device_info["product_type"]
+            product_version = device_info["version"]
+            product_build = device_info["build"]
+            ramdisk_declared = device_info["ramdisk_path"]
             ramdisk_path = _verify_ramdisk_in_zip(zf, ramdisk_declared)
 
             logger.debug(
@@ -536,3 +594,90 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+# ---------------------------------------------------------------------------
+#  High-level scan with detailed per-file logging
+# ---------------------------------------------------------------------------
+
+def scan_folder(folder: str) -> List[IPSWInfo]:
+    """Scan *folder* for IPSWs, parse each one, filter for A12/A13 models.
+
+    Cada ficheiro excluído gera uma mensagem de log a explicar porquê.
+    Se nada for encontrado, o log inclui sugestões para o utilizador.
+    """
+    ipsw_files = find_ipsws(folder)
+
+    if not ipsw_files:
+        logger.warning("Nenhum ficheiro .ipsw válido encontrado em '%s'.", folder)
+        logger.warning(
+            "Verifique se a pasta contém IPSWs dos modelos suportados: "
+            "iPhone XS/XR, XS Max, 11, 11 Pro, 11 Pro Max, SE (2ª geração)."
+        )
+        return []
+
+    results: List[IPSWInfo] = []
+
+    for ipsw in ipsw_files:
+        try:
+            with zipfile.ZipFile(ipsw, "r") as zf:
+                plist = _extract_plist(zf)
+        except (zipfile.BadZipFile, ValueError) as exc:
+            logger.warning("Ignorado: %s — %s", ipsw.name, exc)
+            continue
+
+        device_info = _get_device_info(plist)
+        if device_info is None:
+            logger.warning(
+                "Ignorado: %s — BuildManifest sem ProductType/RestoreRamDisk válido.",
+                ipsw.name,
+            )
+            continue
+
+        product_type = device_info["product_type"]
+        if not is_a12_a13(product_type):
+            logger.info(
+                "Ignorado: %s — modelo %s não é um iPhone A12/A13 suportado.",
+                ipsw.name, product_type,
+            )
+            continue
+
+        # Resolve o caminho real do ramdisk dentro do ZIP
+        try:
+            with zipfile.ZipFile(ipsw, "r") as zf:
+                ramdisk_path = _verify_ramdisk_in_zip(zf, device_info["ramdisk_path"])
+        except (zipfile.BadZipFile, KeyError) as exc:
+            logger.warning(
+                "Ignorado: %s — ramdisk não encontrado no ZIP (%s).",
+                ipsw.name, exc,
+            )
+            continue
+
+        info = IPSWInfo(
+            ipsw_path=ipsw,
+            product_type=product_type,
+            product_version=device_info["version"],
+            product_build=device_info["build"],
+            ramdisk_path=ramdisk_path,
+        )
+
+        logger.info(
+            "OK: %s — %s iOS %s (%s)",
+            ipsw.name, product_type,
+            device_info["version"], device_info["build"],
+        )
+        results.append(info)
+
+    if not results:
+        logger.warning(
+            "Nenhum ramdisk de iPhone A12/A13 encontrado. Motivos possíveis:\n"
+            "  • A pasta não contém ficheiros .ipsw\n"
+            "  • Os IPSWs são de modelos não suportados (apenas A12/A13)\n"
+            "  • Os ficheiros .ipsw podem estar corrompidos ou incompletos"
+        )
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+#  DMG validation
+# ---------------------------------------------------------------------------

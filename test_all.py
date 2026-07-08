@@ -212,22 +212,22 @@ class TestBackendScan(unittest.TestCase):
 
     def test_finds_ipsw_files(self) -> None:
         with _TempDir() as tmp:
-            (tmp / "a.ipsw").touch()
-            (tmp / "b.ipsw").touch()
+            self._touch_zip(tmp / "a.ipsw")
+            self._touch_zip(tmp / "b.ipsw")
             (tmp / "readme.txt").touch()
-            self.assertEqual(len(find_ipsw_files(tmp)), 2)
+            self.assertEqual(len(find_ipsw_files(tmp)), 2, msg="Deve encontrar os 2 .ipsw que são ZIPs válidos")
 
     def test_recursive_scan(self) -> None:
         with _TempDir() as tmp:
             sub = tmp / "sub"
             sub.mkdir()
-            (sub / "nested.ipsw").touch()
-            self.assertEqual(len(find_ipsw_files(tmp)), 1)
+            self._touch_zip(sub / "nested.ipsw")
+            self.assertEqual(len(find_ipsw_files(tmp)), 1, msg="Deve encontrar o .ipsw aninhado")
 
     def test_sorted_output(self) -> None:
         with _TempDir() as tmp:
-            (tmp / "z.ipsw").touch()
-            (tmp / "a.ipsw").touch()
+            self._touch_zip(tmp / "z.ipsw")
+            self._touch_zip(tmp / "a.ipsw")
             files = find_ipsw_files(tmp)
             self.assertEqual(files[0].name, "a.ipsw")
             self.assertEqual(files[1].name, "z.ipsw")
@@ -244,10 +244,12 @@ class TestBackendScan(unittest.TestCase):
             with self.assertRaises(NotADirectoryError):
                 find_ipsw_files(f)
 
+    @staticmethod
+    def _touch_zip(path: Path) -> None:
+        """Cria um ficheiro com assinatura ZIP para passar a validação de _is_zip_file."""
+        with open(path, "wb") as f:
+            f.write(b"PK\x03\x04")
 
-# ══════════════════════════════════════════════════════════════════════════
-#  Tests: backend.py — parsing
-# ══════════════════════════════════════════════════════════════════════════
 
 class TestBackendParse(unittest.TestCase):
     """BuildManifest.plist parsing."""

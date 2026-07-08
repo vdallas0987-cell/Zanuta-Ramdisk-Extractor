@@ -496,7 +496,19 @@ class MainWindow(QMainWindow):
             )
         else:
             self._status_msg.setText(
-                "No A12/A13 ramdisks found."
+                "Nenhum ramdisk de iPhone A12/A13 encontrado."
+            )
+            # Log detalhado com dicas para o utilizador
+            self._append_log(
+                "Nenhum ramdisk de iPhone A12/A13 encontrado.", "WARNING"
+            )
+            self._append_log(
+                "Verifique se a pasta contém IPSWs dos modelos suportados:",
+                "INFO",
+            )
+            self._append_log(
+                "  iPhone XS/XR, XS Max, 11, 11 Pro, 11 Pro Max, SE (2ª geração)",
+                "INFO",
             )
         self._update_status_bar()
 

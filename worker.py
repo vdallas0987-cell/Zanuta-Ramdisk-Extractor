@@ -91,7 +91,12 @@ class Worker(QThread):
             return
 
         if not files:
-            self.log.emit("No .ipsw files found in the selected folder.", "WARNING")
+            self.log.emit("Nenhum ficheiro .ipsw válido encontrado na pasta.", "WARNING")
+            self.log.emit(
+                "Verifique se existem IPSWs dos modelos suportados: "
+                "iPhone XS/XR, XS Max, 11, 11 Pro, 11 Pro Max, SE (2ª geração).",
+                "INFO",
+            )
             self.scan_finished.emit([], [])
             return
 
@@ -118,15 +123,15 @@ class Worker(QThread):
                     )
                 else:
                     self.log.emit(
-                        f"Not A12/A13 — {info.product_type} ({path.name})",
+                        f"Ignorado: {path.name} — modelo {info.product_type} não é um iPhone A12/A13 suportado.",
                         "WARNING",
                     )
             except Exception as exc:
-                self.log.emit(f"{path.name}: {exc}", "ERROR")
+                self.log.emit(f"Ignorado: {path.name} — {exc}", "ERROR")
                 errors.append((path.name, str(exc)))
 
         self.log.emit(
-            f"Scan finished. {len(valid)} A12/A13 ramdisk(s) available.",
+            f"Scan concluído. {len(valid)} ramdisk(s) A12/A13 disponíveis.",
             "INFO",
         )
         self.scan_finished.emit(valid, errors)
