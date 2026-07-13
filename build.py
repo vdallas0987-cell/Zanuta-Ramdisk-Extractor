@@ -120,12 +120,12 @@ def main() -> None:
     if system == "Darwin":
         bundle = DIST / "ZanutaRamdiskExtractor.app"
         if bundle.is_dir():
-            print(f"✓ Bundle created: {bundle}")
+            print(f"[OK] Bundle created: {bundle}")
             print(f"  Size: {_dir_size(bundle) / 1_000_000:.0f} MB")
     else:
         exe = DIST / ("ZanutaRamdiskExtractor.exe" if system == "Windows" else "ZanutaRamdiskExtractor")
         if exe.is_file():
-            print(f"✓ Executable created: {exe}")
+            print(f"[OK] Executable created: {exe}")
             print(f"  Size: {exe.stat().st_size / 1_000_000:.0f} MB")
 
     print("Done.")
