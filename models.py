@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 
 class ExtractionStatus(Enum):
@@ -38,6 +38,22 @@ A12_A13_DEVICES = frozenset({
     "iPhone12,5",   # 11 Pro Max
     "iPhone12,8",   # SE 2nd gen
 })
+
+# ── Required firmware components (extracted alongside ramdisk) ────────────
+# ── Required firmware components (extracted alongside ramdisk) ────────────
+# Prefer "RestoreSEP" over "SEP" (both map to SEPFirmware.img4)
+REQUIRED_COMPONENTS: dict[str, str] = {
+    "iBSS":        "iBSS.img4",
+    "iBEC":        "iBEC.img4",
+    "DeviceTree":  "DeviceTree.img4",
+    "KernelCache": "KernelCache.img4",
+    "RestoreSEP":  "SEPFirmware.img4",   # preferred (restore-specific)
+    "SEP":         "SEPFirmware.img4",   # fallback
+}
+
+
+TOOL_VERSION: str = "1.2"
+
 
 DEVICE_NAMES: dict[str, str] = {
     "iPhone11,2": "iPhone XS",
@@ -66,6 +82,7 @@ class IPSWInfo:
     product_build: str
     ramdisk_path: str          # path *inside* the ZIP archive
     device_name: str = ""      # populated automatically on first access
+    digest: Optional[bytes] = None   # SHA-384 from BuildManifest.Digest (48 bytes)
 
     def __post_init__(self) -> None:
         if not self.device_name:
@@ -99,6 +116,7 @@ class ExtractionResult:
     status: ExtractionStatus
     message: str = ""
     output_path: Optional[Path] = None
+    inspection: Optional[DMGInspection] = None
 
 
 @dataclass
@@ -129,3 +147,44 @@ class Stats:
             "skipped": self.skipped,
             "error": self.error,
         }
+
+
+@dataclass
+class DMGInspection:
+    """Result of verifying a DMG file's structure."""
+
+    format_name: str           # human-readable format, e.g. "UDIF DMG"
+    file_size: int             # bytes on disk
+    structure_valid: bool      # structural integrity check passed
+    container_size: Optional[int] = None  # declared size by the container
+    filesystem: Optional[str] = None      # e.g. "APFS", "HFS+", "HFSX"
+    details: str = ""          # human-readable summary
+    digest_verified: Optional[bool] = None  # None = not checked, True = match, False = mismatch
+    encrypted: Optional[bool] = None        # None = unknown, True/False
+
+
+# ── All-components extraction ──────────────────────────────────────────
+
+
+@dataclass
+class ComponentInfo:
+    """Metadata for a single firmware component inside an IPSW."""
+    name: str                    # Manifest key, e.g. "KernelCache", "iBEC"
+    path_in_zip: str             # path inside the ZIP archive
+    product_type: str            # e.g. "iPhone11,8"
+    product_version: str         # e.g. "18.7.9"
+    product_build: str           # e.g. "22H355"
+    source_ipsw: Path            # path to the source IPSW
+    is_firmware_payload: bool = False       # marked as IsFirmwarePayload
+    is_secondary_payload: bool = False      # marked as IsSecondaryFirmwarePayload
+    digest: Optional[bytes] = None          # SHA-384 from BuildManifest.Digest (48 bytes)
+
+
+@dataclass
+class ComponentResult:
+    """Outcome of extracting a single firmware component."""
+    component: ComponentInfo
+    status: ExtractionStatus
+    message: str = ""
+    output_path: Optional[Path] = None
+    digest_verified: Optional[bool] = None

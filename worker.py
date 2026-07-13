@@ -12,7 +12,7 @@ from typing import List
 
 from PySide6.QtCore import QThread, Signal
 
-from backend import extract_ramdisk, find_ipsw_files, parse_ipsw
+from backend import extract_ramdisk, extract_required_components, parse_ipsw, save_unified_metadata
 from models import (
     IPSWInfo,
     ExtractionResult,
@@ -55,11 +55,11 @@ class Worker(QThread):
         """Request cancellation at the next safe point."""
         self._abort = True
 
-    def start_scan(self, directory: Path) -> None:
-        """Begin scanning *directory* for IPSW files (async)."""
+    def start_scan(self, ipsw_path: Path) -> None:
+        """Begin loading and parsing a single IPSW file (async)."""
         self._abort = False
         self._mode = "scan"
-        self._directory = Path(directory)
+        self._ipsw_path = Path(ipsw_path)
         self.start()
 
     def start_extraction(
@@ -83,57 +83,57 @@ class Worker(QThread):
     # ── Scan ─────────────────────────────────────────────────────────
 
     def _run_scan(self) -> None:
-        try:
-            files = find_ipsw_files(self._directory)
-        except NotADirectoryError as exc:
-            self.log.emit(str(exc), "ERROR")
-            self.scan_finished.emit([], [])
+        path = self._ipsw_path
+
+        if not path.is_file():
+            self.log.emit(f"File not found: {path}", "ERROR")
+            self.scan_finished.emit([], [(path.name, "Not found")])
             return
 
-        if not files:
-            self.log.emit("Nenhum ficheiro .ipsw válido encontrado na pasta.", "WARNING")
-            self.log.emit(
-                "Verifique se existem IPSWs dos modelos suportados: "
-                "iPhone XS/XR, XS Max, 11, 11 Pro, 11 Pro Max, SE (2ª geração).",
-                "INFO",
-            )
-            self.scan_finished.emit([], [])
-            return
-
-        self.log.emit(f"Found {len(files)} IPSW file(s). Parsing manifests…", "INFO")
+        self.log.emit(f"Loading {path.name} …", "INFO")
 
         valid: List[IPSWInfo] = []
         errors: List[tuple] = []
 
-        for idx, path in enumerate(files):
-            if self._abort:
-                self.log.emit("Scan cancelled by user.", "WARNING")
-                break
+        # Build a progress callback that feeds the Qt signal
+        def _scan_progress(pct: int) -> None:
+            self.progress.emit(pct, 100)
 
-            self.progress.emit(idx + 1, len(files))
+        if self._abort:
+            self.log.emit("Operation cancelled by the user.", "WARNING")
+            self.scan_finished.emit(valid, errors)
+            return
 
-            try:
-                info = parse_ipsw(path)
-                if is_a12_a13(info.product_type):
-                    valid.append(info)
-                    self.scan_item.emit(info)
-                    self.log.emit(
-                        f"{info.display_name:35s} iOS {info.product_version} ({info.product_build})",
-                        "SUCCESS",
-                    )
-                else:
-                    self.log.emit(
-                        f"Ignorado: {path.name} — modelo {info.product_type} não é um iPhone A12/A13 suportado.",
-                        "WARNING",
-                    )
-            except Exception as exc:
-                self.log.emit(f"Ignorado: {path.name} — {exc}", "ERROR")
-                errors.append((path.name, str(exc)))
+        self.progress.emit(0, 100)
+
+        try:
+            info = parse_ipsw(path, progress_callback=_scan_progress)
+        except Exception as exc:
+            self.log.emit(f"{path.name} — {exc}", "ERROR")
+            errors.append((path.name, str(exc)))
+            self.scan_finished.emit(valid, errors)
+            return
+
+        if not is_a12_a13(info.product_type):
+            self.log.emit(
+                f"{path.name} — modelo {info.product_type} is not a supported A12/A13 device.",
+                "WARNING",
+            )
+            self.scan_finished.emit(valid, errors)
+            return
+
+        valid.append(info)
+        self.scan_item.emit(info)
+        self.log.emit(
+            f"{info.display_name:35s} iOS {info.product_version} ({info.product_build})",
+            "SUCCESS",
+        )
 
         self.log.emit(
-            f"Scan concluído. {len(valid)} ramdisk(s) A12/A13 disponíveis.",
+            f"{path.name} loaded. Ramdisk ready to extract.",
             "INFO",
         )
+        self.progress.emit(100, 100)
         self.scan_finished.emit(valid, errors)
 
     # ── Extraction ───────────────────────────────────────────────────
@@ -165,8 +165,8 @@ class Worker(QThread):
 
             # Per-file progress callback
             _path = str(info.ipsw_path)
-            def _progress(pct: int) -> None:
-                self.file_progress.emit(_path, pct)
+            def _progress(pct: int, _captured_path: str = _path) -> None:
+                self.file_progress.emit(_captured_path, pct)
 
             result = extract_ramdisk(
                 info, self._output_base,
@@ -180,15 +180,40 @@ class Worker(QThread):
                 self.file_progress.emit(_path, 100)
             else:
                 self.file_progress.emit(_path, -1)  # signal failure
-
             if result.status == ExtractionStatus.SUCCESS:
+
                 stats.success += 1
                 self.log.emit(f"  OK  {result.message}", "SUCCESS")
+
+                # ── Extract required components (iBSS, iBEC, DeviceTree, KernelCache, SEP) ──
+                comp_results, comp_stats = extract_required_components(
+                    ipsw_path=info.ipsw_path,
+                    output_base=self._output_base,
+                    product_type=info.product_type,
+                    product_version=info.product_version,
+                    product_build=info.product_build,
+                )
+                for cr in comp_results:
+                    if cr.status == ExtractionStatus.SUCCESS:
+                        self.log.emit(f"    + {cr.message}", "SUCCESS")
+                    elif cr.status == ExtractionStatus.ERROR:
+                        self.log.emit(f"    ! {cr.message}", "ERROR")
+
+                # ── Unified metadata ──
+                try:
+                    save_unified_metadata(
+                        ipsw_info=info,
+                        ramdisk_output=result.output_path,
+                        component_results=comp_results,
+                        output_base=self._output_base,
+                    )
+                except Exception as exc:
+                    self.log.emit(f"Metadata error: {exc}", "WARNING")
+
             elif result.status == ExtractionStatus.ERROR:
                 stats.error += 1
                 self.log.emit(f"  ERR {result.message}", "ERROR")
+
             else:
                 stats.skipped += 1
                 self.log.emit(f"  --  {result.message}", "WARNING")
-
-        self.extraction_finished.emit(stats)

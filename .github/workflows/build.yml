@@ -3,7 +3,14 @@ name: Build and Release Zanuta Ramdisk Extractor
 on:
   release:
     types: [created]
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
+
+env:
+  APP_NAME: ZanutaRamdiskExtractor
 
 jobs:
   build:
@@ -11,6 +18,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout repository
@@ -27,11 +37,56 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
       - name: Build executable
         run: python build.py
+
+      - name: Smoke test (Linux / macOS)
+        if: matrix.os == 'ubuntu-latest' || matrix.os == 'macos-latest'
+        run: |
+          chmod +x dist/${{ env.APP_NAME }}
+          ./dist/${{ env.APP_NAME }} --help 2>&1 | head -5 || true
+          file dist/${{ env.APP_NAME }}
+
+      - name: Smoke test (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          ./dist/${{ env.APP_NAME }}.exe --help 2>&1 | head -5 || true
+
+      - name: Package artifact
+        run: |
+          cd dist
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a -tzip ../${{ env.APP_NAME }}-${{ matrix.os }}.zip *
+          else
+            tar czf ../${{ env.APP_NAME }}-${{ matrix.os }}.tar.gz *
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ZanutaRamdiskExtractor-${{ matrix.os }}
-          path: dist/
+          name: ${{ env.APP_NAME }}-${{ matrix.os }}
+          path: |
+            ${{ env.APP_NAME }}-${{ matrix.os }}.tar.gz
+            ${{ env.APP_NAME }}-${{ matrix.os }}.zip
+          compression-level: 0
+
+  release:
+    needs: build
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            **/*.tar.gz
+            **/*.zip

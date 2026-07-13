@@ -20,6 +20,7 @@ Platform notes
 
 from __future__ import annotations
 
+from os import environ
 import platform
 import shutil
 import subprocess
@@ -85,17 +86,27 @@ def main() -> None:
         ])
 
     # Collect PySide6 data files (plugins, translations, etc.)
+    # NOTE: the path separator in --add-data is platform-specific
+    # (Unix:  Linux/macOS  →  ":")
+    # (Windows:              ";")
     import PySide6  # noqa: F811
     pyside_dir = Path(PySide6.__file__).parent
     if (pyside_dir / "plugins").is_dir():
-        args.extend(["--add-data", f"{pyside_dir / 'plugins'}:PySide6/plugins"])
+        sep = ";" if system == "Windows" else ":"
+        args.extend(["--add-data", f"{pyside_dir / 'plugins'}{sep}PySide6/plugins"])
 
     # Entry point
     args.append(str(ROOT / "app.py"))
 
     # ── Run PyInstaller ──────────────────────────────────────────
     print(f"\nRunning: {' '.join(str(a) for a in args)}\n")
-    result = subprocess.run(args, cwd=ROOT)
+
+    # Headless Linux: Qt precisa de um backend de plataforma mesmo em build
+    env = None
+    if system == "Linux":
+        env = {**environ, "QT_QPA_PLATFORM": "offscreen"}
+
+    result = subprocess.run(args, cwd=ROOT, env=env)
     if result.returncode != 0:
         print(f"\nBuild failed with exit code {result.returncode}.")
         sys.exit(result.returncode)

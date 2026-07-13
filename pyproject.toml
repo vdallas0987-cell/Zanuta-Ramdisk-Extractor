@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta:__legacy__"
+
+[project]
+name = "zanuta-ramdisk-extractor"
+version = "1.2"
+description = "Extract and validate restore ramdisks and firmware components from iPhone A12/A13 IPSW archives"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+keywords = ["ipsw", "ramdisk", "ios", "firmware", "macos", "iphone"]
+authors = [
+    {name = "Zanuta"},
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "PySide6>=6.0,<7",
+]
+
+[project.urls]
+Homepage = "https://github.com/zanuta/ramdisk-extractor"
+
+[project.scripts]
+ramdisk-extractor = "backend:main"
+ramdisk-extractor-gui = "app:main"
+
+[tool.setuptools.packages.find]
+include = ["ramdisk_extractor", "ramdisk_extractor.*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

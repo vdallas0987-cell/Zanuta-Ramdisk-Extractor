@@ -17,14 +17,10 @@ from PySide6.QtCore import (
     QSize,
     QSettings,
     Qt,
-    QUrl,
 )
 from PySide6.QtGui import (
     QAction,
     QColor,
-    QDesktopServices,
-    QDragEnterEvent,
-    QDropEvent,
     QIcon,
     QTextCharFormat,
     QTextCursor,
@@ -35,7 +31,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QMainWindow,
     QMenuBar,
-    QMessageBox,
     QPlainTextEdit,
     QProgressBar,
     QSplitter,
@@ -48,7 +43,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from models import IPSWInfo, ExtractionResult, ExtractionStatus, Stats
+from models import (
+    TOOL_VERSION,
+    IPSWInfo,
+    ExtractionResult,
+    ExtractionStatus,
+    Stats,
+    A12_A13_DEVICES,
+    DEVICE_NAMES,
+)
 from worker import Worker
 
 # ──────────────────────────────────────────────────────────────────────
@@ -93,7 +96,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Zanuta Ramdisk Extractor — iPhone A12/A13")
         self.setMinimumSize(860, 520)
         self.resize(1024, 680)
-        self.setAcceptDrops(True)
 
         # ── Window icon ────────────────────────────────────────
         icon_path = Path(__file__).parent / "resources" / "icon.png"
@@ -102,17 +104,17 @@ class MainWindow(QMainWindow):
 
         # ── Persistent state ─────────────────────────────────────
         self._settings = QSettings("RamdiskExtractor", "RamdiskExtractor")
-        self._input_dir:  Optional[Path] = None
+        self._ipsw_path:  Optional[Path] = None
         self._output_dir: Optional[Path] = None
         self._ipsw_infos: List[IPSWInfo] = []
         self._path_to_row: dict[str, int] = {}
         self._path_to_progress: dict[str, QProgressBar] = {}
 
         # Remember last-used directories
-        last_in = self._settings.value("input_dir", "")
+        last_ipsw = self._settings.value("ipsw_path", "")
         last_out = self._settings.value("output_dir", "")
-        if last_in:
-            self._input_dir = Path(last_in)
+        if last_ipsw:
+            self._ipsw_path = Path(last_ipsw)
         if last_out:
             self._output_dir = Path(last_out)
 
@@ -139,25 +141,25 @@ class MainWindow(QMainWindow):
 
         self.addToolBar(tb)
 
-        self._act_open = QAction(
+        self._act_open_file = QAction(
             self.style().standardIcon(QStyle.SP_DirOpenIcon),
-            "Open Folder",
+            "Open IPSW",
             self,
             shortcut="Ctrl+O",
-            triggered=self._on_open_folder,
+            triggered=self._on_open_file,
         )
-        tb.addAction(self._act_open)
+        tb.addAction(self._act_open_file)
 
         self._act_extract = QAction(
             self.style().standardIcon(QStyle.SP_MediaPlay),
-            "Extract All",
+            "Extract Ramdisk",
             self,
             shortcut="Ctrl+E",
             triggered=self._on_extract_all,
             enabled=False,
         )
         self._act_extract.setToolTip(
-            "Extract all A12/A13 ramdisks from the scanned IPSWs"
+            "Extract the restore ramdisk from the loaded IPSW"
         )
         tb.addAction(self._act_extract)
 
@@ -183,15 +185,6 @@ class MainWindow(QMainWindow):
         tb.addAction(self._act_clear)
 
         tb.addSeparator()
-
-        self._act_open_output = QAction(
-            self.style().standardIcon(QStyle.SP_DirIcon),
-            "Open Output Folder",
-            self,
-            triggered=self._on_open_output,
-            enabled=False,
-        )
-        tb.addAction(self._act_open_output)
 
     def _setup_table(self) -> None:
         self._table = QTableWidget(0, 5, self)
@@ -219,8 +212,13 @@ class MainWindow(QMainWindow):
         hdr.setSectionResizeMode(4, QHeaderView.ResizeToContents)
 
         # Empty-state overlay — shown when table has zero rows
+        device_list = "\n".join(
+            f"  {DEVICE_NAMES.get(d, d)}  ({d})"
+            for d in sorted(A12_A13_DEVICES)
+        )
         self._empty_label = QLabel(
-            "Drop a folder with IPSW files here\nor click Open Folder to start",
+            f"Open an IPSW file to begin\n\n"
+            f"Supported devices:\n{device_list}",
             self._table,
         )
         self._empty_label.setAlignment(Qt.AlignCenter)
@@ -302,40 +300,40 @@ class MainWindow(QMainWindow):
     #  Toolbar action handlers
     # ──────────────────────────────────────────────────────────────
 
-    def _on_open_folder(self) -> None:
-        start = str(self._input_dir) if self._input_dir else ""
-        folder = QFileDialog.getExistingDirectory(
-            self, "Select folder with IPSW files", start,
+    def _on_open_file(self) -> None:
+        start = str(self._ipsw_path.parent) if self._ipsw_path else ""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select an IPSW file",
+            start,
+            "IPSW files (*.ipsw *.IPSW);;All files (*)",
         )
-        if not folder:
+        if not file_path:
             return
 
-        self._input_dir = Path(folder)
-        self._settings.setValue("input_dir", str(self._input_dir))
+        self._ipsw_path = Path(file_path)
+        self._settings.setValue("ipsw_path", str(self._ipsw_path))
 
         # Reset table & state
         self._reset_state()
 
         self._set_busy(True)
-        self._status_msg.setText(f"Scanning {self._input_dir} …")
-        self._worker.start_scan(self._input_dir)
+        self._status_msg.setText(f"Loading {self._ipsw_path.name} …")
+        self._worker.start_scan(self._ipsw_path)
 
     def _on_extract_all(self) -> None:
         if not self._ipsw_infos:
             self._append_log("No ramdisks to extract.", "WARNING")
             return
 
-        # Pick / confirm output directory
-        if not self._output_dir:
-            suggested = self._input_dir.parent / "ramdisks" if self._input_dir else Path.home() / "ramdisks"
-            folder = QFileDialog.getExistingDirectory(
-                self, "Select output directory", str(suggested),
-            )
-            if not folder:
-                return
-            self._output_dir = Path(folder)
-            self._settings.setValue("output_dir", str(self._output_dir))
-            self._act_open_output.setEnabled(True)
+        # Auto-determine output directory: same folder as IPSW, subfolder "ramdisks"
+        suggested = (
+            self._ipsw_path.parent / "ramdisks"
+            if self._ipsw_path
+            else Path.home() / "ramdisks"
+        )
+        self._output_dir = suggested
+        self._settings.setValue("output_dir", str(self._output_dir))
 
         # Reset state per row
         for info in self._ipsw_infos:
@@ -346,24 +344,6 @@ class MainWindow(QMainWindow):
         self._set_busy(True, extracting=True)
         self._status_msg.setText(f"Extracting → {self._output_dir}")
         self._worker.start_extraction(self._ipsw_infos, self._output_dir)
-
-    def _on_set_output_dir(self) -> None:
-        start = str(self._output_dir) if self._output_dir else ""
-        folder = QFileDialog.getExistingDirectory(
-            self, "Select output directory", start,
-        )
-        if not folder:
-            return
-        self._output_dir = Path(folder)
-        self._settings.setValue("output_dir", str(self._output_dir))
-        self._act_open_output.setEnabled(True)
-        self._status_msg.setText(f"Output → {self._output_dir}")
-
-    def _on_open_output(self) -> None:
-        if self._output_dir and self._output_dir.is_dir():
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._output_dir)))
-        else:
-            self._append_log("Output directory not found.", "WARNING")
 
     def _on_stop(self) -> None:
         self._worker.abort()
@@ -394,55 +374,17 @@ class MainWindow(QMainWindow):
 
         if not self._output_dir:
             suggested = (
-                self._input_dir.parent / "ramdisks"
-                if self._input_dir
+                self._ipsw_path.parent / "ramdisks"
+                if self._ipsw_path
                 else Path.home() / "ramdisks"
             )
-            folder = QFileDialog.getExistingDirectory(
-                self, "Select output directory", str(suggested),
-            )
-            if not folder:
-                return
-            self._output_dir = Path(folder)
+            self._output_dir = suggested
             self._settings.setValue("output_dir", str(self._output_dir))
-            self._act_open_output.setEnabled(True)
 
         self._set_row_status(row, ExtractionStatus.EXTRACTING, "")
         self._set_busy(True, extracting=True)
         self._status_msg.setText("Extracting 1 ramdisk …")
         self._worker.start_extraction([target], self._output_dir)
-
-    # ──────────────────────────────────────────────────────────────
-    #  Drag & drop
-    # ──────────────────────────────────────────────────────────────
-
-    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-            self._table.setStyleSheet(
-                "QTableWidget { border: 2px dashed #0969da; }"
-            )
-
-    def dragLeaveEvent(self, event) -> None:
-        event.accept()
-        self._table.setStyleSheet("")
-
-    def dropEvent(self, event: QDropEvent) -> None:
-        self._table.setStyleSheet("")
-        urls = [u for u in event.mimeData().urls() if u.isLocalFile()]
-        if not urls:
-            return
-
-        # Use the first dropped directory
-        path = Path(urls[0].toLocalFile())
-        if path.is_dir():
-            self._input_dir = path
-            self._settings.setValue("input_dir", str(self._input_dir))
-            self._reset_state()
-            self._append_log(f"Dropped: {path}", "INFO")
-            self._set_busy(True)
-            self._status_msg.setText(f"Scanning {path} …")
-            self._worker.start_scan(path)
 
     # ──────────────────────────────────────────────────────────────
     #  Worker slot handlers
@@ -485,37 +427,49 @@ class MainWindow(QMainWindow):
             pbar.setValue(percent)
 
     def _on_scan_finished(self, valid: List[IPSWInfo], _errors: list) -> None:
+        # Log any errors from the scan phase
+        for name, msg in _errors:
+            self._append_log(f"{name}: {msg}", "ERROR")
+
         self._ipsw_infos = valid
         self._set_busy(False)
-        # Re-enable sorting now that all rows are in place
-        self._table.setSortingEnabled(True)
 
         if valid:
             self._status_msg.setText(
-                f"Scan complete — {len(valid)} ramdisk(s) ready to extract."
+                f"{valid[0].display_name} — ramdisk ready to extract."
             )
+            self._act_extract.setEnabled(True)
         else:
-            self._status_msg.setText(
-                "Nenhum ramdisk de iPhone A12/A13 encontrado."
-            )
-            # Log detalhado com dicas para o utilizador
             self._append_log(
-                "Nenhum ramdisk de iPhone A12/A13 encontrado.", "WARNING"
+                "The selected IPSW does not contain a supported A12/A13 device.",
+                "WARNING",
             )
             self._append_log(
-                "Verifique se a pasta contém IPSWs dos modelos suportados:",
+                "Supported: iPhone XS/XR, XS Max, 11, 11 Pro, 11 Pro Max, SE (2nd gen)",
                 "INFO",
             )
-            self._append_log(
-                "  iPhone XS/XR, XS Max, 11, 11 Pro, 11 Pro Max, SE (2ª geração)",
-                "INFO",
-            )
+            self._status_msg.setText("Unsupported device — try another IPSW.")
+            self._act_extract.setEnabled(False)
         self._update_status_bar()
 
     def _on_extraction_item(self, result: ExtractionResult) -> None:
         row = self._path_to_row.get(str(result.ipsw_info.ipsw_path))
         if row is None:
             return
+
+        # Log structural inspection details on success
+        insp = result.inspection
+        if insp is not None and result.status == ExtractionStatus.SUCCESS:
+            self._append_log(
+                f"  Format: {insp.format_name}  |  {insp.details}",
+                "SUCCESS" if insp.structure_valid else "WARNING",
+            )
+            if insp.filesystem:
+                self._append_log(
+                    f"  Filesystem: {insp.filesystem}",
+                    "INFO",
+                )
+
         self._set_row_status(row, result.status, result.message)
 
     def _on_extraction_finished(self, stats: Stats) -> None:
@@ -541,7 +495,7 @@ class MainWindow(QMainWindow):
         self._append_log(msg, "INFO")
 
     def _on_progress(self, current: int, total: int) -> None:
-        phase = "Scanning" if self._worker.mode == "scan" else "Extracting"
+        phase = "Loading" if self._worker.mode == "scan" else "Extracting"
         self._status_msg.setText(f"{phase} {current}/{total} …")
         self._update_status_bar()
 
@@ -561,12 +515,11 @@ class MainWindow(QMainWindow):
         self._path_to_progress.clear()
         self._update_status_bar()
         self._act_extract.setEnabled(False)
-        self._act_open_output.setEnabled(False)
         # Start fresh output selection on next extract
         self._output_dir = None
 
     def _set_busy(self, busy: bool, extracting: bool = False) -> None:
-        self._act_open.setEnabled(not busy)
+        self._act_open_file.setEnabled(not busy)
         self._act_extract.setEnabled(not busy and bool(self._ipsw_infos))
         self._act_stop.setEnabled(extracting)
 
@@ -619,7 +572,7 @@ class MainWindow(QMainWindow):
                 pbar.setValue(0)
                 pbar.setVisible(True)
                 self._table.setCellWidget(row, 4, pbar)
-            # NÃO usar setItem — a barra é o widget da célula
+            # Do NOT use setItem — the bar is the cell widget
 
         # READY / outros: manter o estado actual (barra escondida)
 
@@ -678,25 +631,21 @@ class MainWindow(QMainWindow):
     # ──────────────────────────────────────────────────────────────────────
 
     def _setup_menu_bar(self) -> None:
-        """Create the menu bar with File and Help menus."""
+        """Create the menu bar with the Help menu."""
         mb = self.menuBar()
-
-        file_menu = mb.addMenu("File")
-        set_out = file_menu.addAction("Set Output Directory …")
-        set_out.setShortcut("Ctrl+D")
-        set_out.triggered.connect(self._on_set_output_dir)
 
         help_menu = mb.addMenu("Help")
         about_action = help_menu.addAction("About Zanuta Ramdisk Extractor")
         about_action.triggered.connect(self._show_about)
 
     def _show_about(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
         QMessageBox.about(
             self,
             "About Zanuta Ramdisk Extractor",
-            "<b>Zanuta Ramdisk Extractor v1.0</b><br><br>"
-            "Developed by TimoCamada<br><br>"
-            "Compatible with iPhone A12/A13 devices.",
+            ("<b>Zanuta Ramdisk Extractor v{}</b><br><br>"
+             "Developed by TimoCamada<br><br>"
+             "Compatible with iPhone A12/A13 devices.").format(TOOL_VERSION),
         )
 
 

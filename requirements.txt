@@ -1,1 +1,2 @@
-PySide6>=6.6,<7
+# Runtime dependencies for Zanuta Ramdisk Extractor
+PySide6>=6.0,<7
