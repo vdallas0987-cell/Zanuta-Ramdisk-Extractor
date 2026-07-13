@@ -86,7 +86,8 @@ def main() -> None:
         ])
         # CI builds usually don't have signing certs — skip signing
         if environ.get("SKIP_CODESIGN", "").strip() in ("1", "true", "yes"):
-            args.append("--nosign")
+            args.append("--codesign-identity")
+            args.append("-")
             print("  codesign skipped (SKIP_CODESIGN=1)")
 
     # Collect PySide6 data files (plugins, translations, etc.)

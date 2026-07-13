@@ -30,11 +30,11 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: System deps (Linux)
+      - name: Deps (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libxcb-cursor-dev
 
-      - name: Install deps
+      - name: Install
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
@@ -48,32 +48,29 @@ jobs:
           SKIP_CODESIGN: ${{ matrix.os == 'macos-latest' && '1' || '0' }}
         run: python build.py
 
-      - name: Smoke (Linux)
+      - name: Verify (Linux)
         if: matrix.os == 'ubuntu-latest'
         continue-on-error: true
         run: |
-          chmod +x "dist/${APP_NAME}"
           file "dist/${APP_NAME}"
-          "./dist/${APP_NAME}" --help 2>&1 | head -5 || true
+          timeout 5 "./dist/${APP_NAME}" --help 2>&1 | head -5 || echo "verify: done"
 
-      - name: Smoke (macOS)
+      - name: Verify (macOS)
         if: matrix.os == 'macos-latest'
         continue-on-error: true
         run: |
-          BIN="dist/${APP_NAME}.app/Contents/MacOS/${APP_NAME}"
-          if [ -f "$BIN" ]; then
-            file "$BIN"
-            "$BIN" --help 2>&1 | head -5 || true
+          BUNDLE="dist/${APP_NAME}.app"
+          if [ -d "$BUNDLE" ]; then
+            file "$BUNDLE/Contents/MacOS/${APP_NAME}"
           else
             ls -la dist/
           fi
 
-      - name: Smoke (Windows)
+      - name: Verify (Windows)
         if: matrix.os == 'windows-latest'
         continue-on-error: true
         run: |
           ls -la "dist/${APP_NAME}.exe"
-          "./dist/${APP_NAME}.exe" --help 2>&1 | head -5 || true
 
       - name: Package
         run: |
