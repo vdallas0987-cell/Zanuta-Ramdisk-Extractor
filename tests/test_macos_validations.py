@@ -255,13 +255,12 @@ class TestIMG4SignatureVerification(unittest.TestCase):
     def test_verify_img4_signature_returns_true(self, mock_run):
         """_verify_img4_signature returns True when img4tool succeeds."""
         mock_run.return_value = MagicMock(returncode=0)
-        result = _verify_img4_signature(
-            Path("/fake/BuildManifest.plist"),
-            Path("/fake/component.img4"),
-        )
+        fake_manifest = Path("/fake/BuildManifest.plist")
+        fake_component = Path("/fake/component.img4")
+        result = _verify_img4_signature(fake_manifest, fake_component)
         self.assertTrue(result)
         mock_run.assert_called_once_with(
-            ["img4tool", "--verify", "/fake/BuildManifest.plist", "/fake/component.img4"],
+            ["img4tool", "--verify", str(fake_manifest), str(fake_component)],
             capture_output=True, text=True, timeout=30,
         )
 

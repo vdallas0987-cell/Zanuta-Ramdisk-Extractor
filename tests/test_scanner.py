@@ -81,7 +81,7 @@ class TestFindIPSWs(unittest.TestCase):
             pass
         found = find_ipsws(str(self.tmp), recursive=True)
         self.assertEqual(len(found), 1)
-        self.assertEqual(found[0], p)
+        self.assertEqual(found[0].resolve(), p.resolve())
 
     def test_non_recursive(self) -> None:
         sub = self.tmp / "sub"
