@@ -84,6 +84,10 @@ def main() -> None:
             "--osx-bundle-identifier",
             "com.ramdiskextractor.app",
         ])
+        # CI builds usually don't have signing certs — skip signing
+        if environ.get("SKIP_CODESIGN", "").strip() in ("1", "true", "yes"):
+            args.append("--nosign")
+            print("  codesign skipped (SKIP_CODESIGN=1)")
 
     # Collect PySide6 data files (plugins, translations, etc.)
     # NOTE: the path separator in --add-data is platform-specific
