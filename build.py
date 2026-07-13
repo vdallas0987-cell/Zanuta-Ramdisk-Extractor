@@ -42,7 +42,7 @@ def main() -> None:
         sys.exit(1)
 
     system = platform.system()
-    print(f"Building Ramdisk Extractor for {system} …")
+    print(f"Building Ramdisk Extractor for {system} ...")
 
     # ── Clean previous builds ────────────────────────────────────
     for d in [DIST, BUILD]:
@@ -76,7 +76,7 @@ def main() -> None:
         args.extend(["--icon", str(icon)])
         print(f"  using icon: {icon.name}")
     else:
-        print("  no icon found — skipping")
+        print("  no icon found -- skipping")
 
     # macOS bundle metadata
     if system == "Darwin":

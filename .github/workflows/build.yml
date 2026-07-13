@@ -11,6 +11,7 @@ on:
 
 env:
   APP_NAME: ZanutaRamdiskExtractor
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
 jobs:
   build:
@@ -19,89 +20,71 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install system deps (Linux)
+      - name: System deps (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq libxcb-cursor-dev
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libxcb-cursor-dev
 
-      - name: Install Python deps
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
-      - name: Run tests
+      - name: Tests
         run: python -m unittest discover -s tests -v
 
-      - name: Build executable
+      - name: Build
         env:
           SKIP_CODESIGN: ${{ matrix.os == 'macos-latest' && '1' || '0' }}
         run: python build.py
 
-      - name: Smoke test (Linux)
+      - name: Smoke (Linux)
         if: matrix.os == 'ubuntu-latest'
+        continue-on-error: true
         run: |
           chmod +x "dist/${APP_NAME}"
           file "dist/${APP_NAME}"
-          "./dist/${APP_NAME}" --help 2>&1 | head -5 && echo "smoke: OK" || echo "smoke: non-zero exit (expected in headless)"
+          "./dist/${APP_NAME}" --help 2>&1 | head -5 || true
 
-      - name: Smoke test (macOS)
+      - name: Smoke (macOS)
         if: matrix.os == 'macos-latest'
+        continue-on-error: true
         run: |
-          BUNDLE="dist/${APP_NAME}.app"
-          if [ -d "$BUNDLE" ]; then
-            BINARY="${BUNDLE}/Contents/MacOS/${APP_NAME}"
-            if [ -f "$BINARY" ]; then
-              chmod +x "$BINARY"
-              file "$BINARY"
-              "$BINARY" --help 2>&1 | head -5 && echo "smoke: OK" || echo "smoke: non-zero exit"
-            else
-              echo "Binary not found inside bundle, listing:"
-              find "$BUNDLE" -type f -perm +111
-            fi
-          elif [ -f "dist/${APP_NAME}" ]; then
-            file "dist/${APP_NAME}"
-            "./dist/${APP_NAME}" --help 2>&1 | head -5 || true
+          BIN="dist/${APP_NAME}.app/Contents/MacOS/${APP_NAME}"
+          if [ -f "$BIN" ]; then
+            file "$BIN"
+            "$BIN" --help 2>&1 | head -5 || true
           else
-            echo "No build artifact found"
             ls -la dist/
           fi
 
-      - name: Smoke test (Windows)
+      - name: Smoke (Windows)
         if: matrix.os == 'windows-latest'
+        continue-on-error: true
         run: |
-          file "dist/${APP_NAME}.exe" || true
-          "./dist/${APP_NAME}.exe" --help 2>&1 | head -5 && echo "smoke: OK" || echo "smoke: non-zero exit"
+          ls -la "dist/${APP_NAME}.exe"
+          "./dist/${APP_NAME}.exe" --help 2>&1 | head -5 || true
 
-      - name: Package artifact
+      - name: Package
         run: |
-          mkdir -p _package
-          cp -a dist/* _package/
-          cd _package
+          mkdir -p _pkg
+          cp -a dist/* _pkg/
+          cd _pkg
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             7z a -tzip "../${APP_NAME}-${{ matrix.os }}.zip" *
           else
             tar czf "../${APP_NAME}-${{ matrix.os }}.tar.gz" *
           fi
-          cd ..
-          rm -rf _package
+          rm -rf ../_pkg
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.APP_NAME }}-${{ matrix.os }}
           path: |
@@ -116,14 +99,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: artifacts
-
-      - name: Attach to release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*

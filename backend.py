@@ -123,7 +123,7 @@ def main() -> None:
         for ipsw_path in ipsw_files:
             try:
                 info = parse_ipsw(ipsw_path)
-                verdict = "✓ A12/A13" if is_a12_a13(info.product_type) else "✗ skipped"
+                verdict = "[OK] A12/A13" if is_a12_a13(info.product_type) else "[ERR] skipped"
                 print(f"  [{verdict}] {info.display_name:35s}  iOS {info.product_version} ({info.product_build})")
             except Exception as exc:
                 print(f"  [ERROR] {ipsw_path.name}: {exc}")
@@ -132,16 +132,16 @@ def main() -> None:
     # --- Process ---
     def _on_item(result: ExtractionResult) -> None:
         icon = {
-            ExtractionStatus.SUCCESS: "✓",
-            ExtractionStatus.ERROR:   "✗",
-            ExtractionStatus.SKIPPED: "–",
+            ExtractionStatus.SUCCESS: "[OK]",
+            ExtractionStatus.ERROR:   "[ERR]",
+            ExtractionStatus.SKIPPED: "[-]",
         }.get(result.status, "?")
         print(f"  [{icon}] {result.ipsw_info.display_name:35s}  {result.message}")
 
     def _on_progress(current: int, total: int) -> None:
         pass
 
-    print(f"\nProcessing {len(ipsw_files)} IPSW(s) → {args.output}\n")
+    print(f"\nProcessing {len(ipsw_files)} IPSW(s) -> {args.output}\n")
     results, stats = process_all(ipsw_files, args.output, _on_progress, _on_item)
     print(f"\n{'='*50}")
     print(f"  {stats}")
