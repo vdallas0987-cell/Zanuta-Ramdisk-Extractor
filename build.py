@@ -101,7 +101,7 @@ def main() -> None:
     # ── Run PyInstaller ──────────────────────────────────────────
     print(f"\nRunning: {' '.join(str(a) for a in args)}\n")
 
-    # Headless Linux: Qt precisa de um backend de plataforma mesmo em build
+    # Headless Linux: Qt needs a platform backend even during build
     env = None
     if system == "Linux":
         env = {**environ, "QT_QPA_PLATFORM": "offscreen"}

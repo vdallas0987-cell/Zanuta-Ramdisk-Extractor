@@ -1,33 +1,33 @@
 # Zanuta Ramdisk Extractor
 
-Extrai e valida **restore ramdisks** e **firmware components** (iBSS, iBEC, DeviceTree, KernelCache, SEP) de IPSWs de dispositivos iPhone A12/A13.
+Extract and validate **restore ramdisks** and **firmware components** (iBSS, iBEC, DeviceTree, KernelCache, SEP) from iPhone A12/A13 IPSW archives.
 
 ---
 
-## Funcionalidades
+## Features
 
-- **Extracao de ramdisk** — streams o restore ramdisk DMG do IPSW para disco com validacao estrutural
-- **Componentes de firmware** — extrai iBSS, iBEC, DeviceTree, KernelCache e SEP
-- **Validacao macOS** (apenas em macOS):
-  - `hdiutil verify` — verificacao nativa da integridade do DMG
-  - `img4tool --verify` — verificacao de assinatura IMG4 para iBSS, iBEC, DeviceTree, SEP
-  - `hdiutil attach -nomount` — confirmacao de que o ramdisk e montavel
-- **Verificacao de digest** — SHA-384 a partir do BuildManifest.plist
-- **Metadata sidecar** — JSON com dispositivo, firmware, digest e validacoes
-- **Interface grafica** — PySide6 com tabela de IPSWs, log colorido e progresso
-- **Linha de comando** — processamento batch com `--dry-run`
+- **Ramdisk extraction** — streams the restore ramdisk DMG from the IPSW to disk with structural validation
+- **Firmware components** — extracts iBSS, iBEC, DeviceTree, KernelCache, and SEP
+- **macOS validation** (macOS only):
+  - `hdiutil verify` — native DMG integrity verification
+  - `img4tool --verify` — IMG4 signature verification for iBSS, iBEC, DeviceTree, SEP
+  - `hdiutil attach -nomount` — confirms the ramdisk is mountable
+- **Digest verification** — SHA-384 from BuildManifest.plist
+- **Metadata sidecar** — JSON with device, firmware, digest, and validation results
+- **Graphical interface** — PySide6 with IPSW table, colored log, and progress bar
+- **Command line** — batch processing with `--dry-run`
 
 ---
 
-## Requisitos
+## Requirements
 
 - Python >= 3.11
 - PySide6 >= 6.0 (runtime)
-- _Opcional (macOS):_ `hdiutil` (nativo), `img4tool` para verificacao de assinatura
+- _Optional (macOS):_ `hdiutil` (built-in), `img4tool` for signature verification
 
 ---
 
-## Instalacao
+## Installation
 
 ```bash
 git clone <repo>
@@ -39,15 +39,15 @@ pip install -r requirements.txt
 
 ---
 
-## Uso
+## Usage
 
-### Interface grafica
+### Graphical interface
 
 ```bash
 python app.py
 ```
 
-### Linha de comando
+### Command line
 
 ```bash
 python backend.py ~/Downloads/IPSWs -o ./ramdisks
@@ -56,26 +56,34 @@ python backend.py ~/Downloads/IPSWs --dry-run
 
 ---
 
-## Build standalone
+## Standalone build
 
-Gera um executavel unico (via PyInstaller) em `dist/`:
+Generates a single executable (via PyInstaller) in `dist/`:
 
 ```bash
 pip install -r requirements-dev.txt
 python build.py
 ```
 
-Resultado:
+Output:
 
-| Plataforma | Ficheiro |
-|-----------|----------|
-| Linux     | `dist/ZanutaRamdiskExtractor` |
-| macOS     | `dist/ZanutaRamdiskExtractor.app` |
-| Windows   | `dist/ZanutaRamdiskExtractor.exe` |
+| Platform | Artifact |
+|----------|----------|
+| Linux    | `dist/ZanutaRamdiskExtractor` |
+| macOS    | `dist/ZanutaRamdiskExtractor.app` |
+| Windows  | `dist/ZanutaRamdiskExtractor.exe` |
+
+### Universal source package
+
+```bash
+make package       # creates dist/zanuta-ramdisk-extractor-<version>.zip
+```
+
+The zip contains all source files, a `Makefile` (Linux/macOS), and `scripts/build.bat` (Windows). Users can build from source on any platform.
 
 ---
 
-## Testes
+## Tests
 
 ```bash
 python -m unittest discover -s tests -v
@@ -83,26 +91,36 @@ python -m unittest discover -s tests -v
 
 ---
 
-## Extrutura do projeto
+## Project structure
 
 ```
 ramdisk_extractor/
-├── app.py              # GUI PySide6
-├── backend.py          # Facade + entry point CLI
-├── build.py            # Script PyInstaller
-├── extractor.py        # Logica de extracao
-├── models.py           # Modelos de dados
-├── parser.py           # Parsing de IPSW / BuildManifest
-├── scanner.py          # Descoberta de ficheiros IPSW
-├── validator.py        # Validacao DMG e componentes
-├── worker.py           # Thread de background para a GUI
-├── tests/              # Suite de testes (131 tests)
-├── resources/          # Icones (icns, ico, png)
-└── pyproject.toml      # Metadados do projeto
+├── app.py              # PySide6 GUI
+├── backend.py          # Facade + CLI entry point
+├── build.py            # PyInstaller build script
+├── extractor.py        # Extraction logic
+├── models.py           # Data models
+├── parser.py           # IPSW / BuildManifest parsing
+├── scanner.py          # IPSW file discovery
+├── validator.py        # DMG and component validation
+├── worker.py           # Background worker thread for the GUI
+├── Makefile            # Universal build targets
+├── pyproject.toml      # Project metadata
+├── scripts/
+│   ├── build.bat       # Windows setup + build script
+│   └── package.sh      # Source package generator
+├── tests/              # Test suite (131 tests)
+└── resources/          # App icons (icns, ico, png)
 ```
 
 ---
 
-## Licenca
+## CI/CD
+
+GitHub Actions workflow (`.github/workflows/build.yml`) builds for all three platforms on every push to `main`, runs the full test suite, and attaches artifacts to releases.
+
+---
+
+## License
 
 MIT
